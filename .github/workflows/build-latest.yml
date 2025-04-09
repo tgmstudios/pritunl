@@ -13,57 +13,47 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      -
-        name: Checkout
+      - name: Extract branch name
+        shell: bash
+        run: echo "branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+        id: extract_branch
+      - name: Checkout
         uses: actions/checkout@v4
-      -
-        name: Set up dynamic build ARGs
+      - name: Set up dynamic build ARGs
         id: getargs
         run: echo "version=$(cat ./stable/VERSION)" >> $GITHUB_OUTPUT
-      -
-        name: Set up Docker metadata for Alpine
-        id: meta-alpine
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ${{ github.repository }}
-            ghcr.io/${{ github.repository }}
-          tags: |
-            type=raw,latest
-#            type=raw,${{ steps.getargs.outputs.version }}
-          labels: |
-            org.opencontainers.image.vendor=The Goofball - goofball222@gmail.com
-            org.opencontainers.image.title=Pritunl Server
-            org.opencontainers.image.description=Pritunl Server
-            org.opencontainers.image.version=${{ steps.getargs.outputs.version }}
-      -
-        name: Set up QEMU
+      - name: Set up QEMU.
         uses: docker/setup-qemu-action@v3
-      -
-        name: Set up Docker Buildx
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      -
-        name: Login to DockerHub
+      - name: Login to TGM Docker Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      -
-        name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      -
-        name: Build and push Alpine Docker image
+          registry: registry.psuccso.org
+          username: robot$pritunl+github
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Generate Tag Names
+        run: |
+          echo "${{ steps.extract_branch.outputs.branch }}"
+          if [ ${{ steps.extract_branch.outputs.branch }} = "main" ]; then
+            echo "TAG_LATEST=pritunl:latest" >> $GITHUB_ENV
+            echo "TAG_COMMIT=pritunl:$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          elif [ ${{ steps.extract_branch.outputs.branch }} = "stage" ]; then
+            echo "TAG_LATEST=pritunl-stage:latest" >> $GITHUB_ENV
+            echo "TAG_COMMIT=pritunl-stage:$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          else
+            exit 0
+          fi
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: ./stable
-          file: ./stable/Dockerfile
           platforms: linux/amd64,linux/arm64
-#          platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta-alpine.outputs.tags }}
-          labels: ${{ steps.meta-alpine.outputs.labels }}
+          file: ./stable/Dockerfile
+          push: true
+          tags: |
+            registry.psuccso.org/pritunl/${{ env.TAG_LATEST }}
+            registry.psuccso.org/pritunl/${{ env.TAG_COMMIT }}
           build-args: VERSION=${{ steps.getargs.outputs.version }}
+          cache-from: type=registry,ref=registry.psuccso.org/pritunl/${{ env.TAG_LATEST }}
+          cache-to: type=inline
